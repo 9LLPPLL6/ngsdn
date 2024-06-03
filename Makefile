@@ -7,7 +7,7 @@ onos_url := http://localhost:8181/onos
 onos_curl := curl --fail -sSL --user onos:rocks --noproxy localhost
 app_name := org.onosproject.ngsdn-tutorial
 
-NGSDN_TUTORIAL_SUDO ?=
+NGSDN_TUTORIAL_SUDO ?= sudo
 
 default:
 	$(error Please specify a make target (see README.md))
@@ -54,6 +54,7 @@ stop:
 	@NGSDN_TOPO_PY=foo docker-compose down -t0
 
 restart: reset start
+restart-ddos: reset start-ddos
 
 onos-cli:
 	$(info *** Connecting to the ONOS CLI... password: rocks)

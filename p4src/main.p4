@@ -43,6 +43,9 @@
 #define PACKET_THRESHOLD 10
 #define BLOOM_FILTER_ENTRIES2 8192
 
+//packet clone session id
+#define PACKET_CLONE_SESSION_ID   100
+
 typedef bit<9>   port_num_t;
 typedef bit<48>  mac_addr_t;
 typedef bit<16>  mcast_group_id_t;
@@ -226,6 +229,9 @@ struct local_metadata_t {
     bit<32> counter_three;
     bit<32> output_hash_four;
     bit<32> counter_four;
+
+    bit<8> hit_bit;
+    bool is_clone;
 }
 
 
@@ -372,7 +378,6 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
     register<bit<BLOOM_FILTER_BIT_WIDTH>>(BLOOM_FILTER_ENTRIES) bloom_filter;
     register<bit<BLOOM_FILTER_BIT_WIDTH>>(BLOOM_FILTER_ENTRIES2) bloom_filter2;
 
-   
     // bit<1> direction; // 0表示内部向外界建立tcp，1表示外部流量进入
 
     // Drop action shared by many tables.
@@ -759,7 +764,55 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
         counters = direct_counter(CounterType.packets_and_bytes);
     }
 
+    //clone the packet and then set srv6 header to throughput guide 
+    action packet_clone(){
+        local_metadata.is_clone = true;
+        clone3(CloneType.I2E, PACKET_CLONE_SESSION_ID, { standard_metadata.ingress_port, local_metadata.is_clone,local_metadata.hit_bit });
+        //clone_ingress_pkt_to_egress();
+    }
+
+    table guide_table{
+        key = {
+            local_metadata.hit_bit:       exact;
+            // standard_metadata.ingress_port:    exact;
+        }
+        actions = {
+            packet_clone;
+        }
+        @name("guide_table_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
+    action_selector(HashAlgorithm.crc16, 32w3, 32w3) host_selector;
+
+    action set_dst(bit<128> dst_addr,mac_addr_t dst_mac){
+        hdr.ipv6.dst_addr = dst_addr;
+        hdr.ethernet.dst_addr = dst_mac;
+    }
+
+    table select_host{
+        key = {
+            local_metadata.hit_bit:  exact;
+            hdr.ipv6.dst_addr:          selector;
+            hdr.ipv6.flow_label:        selector;
+            hdr.ipv6.src_addr:          selector;
+        }
+        actions = {
+             //set_dst;
+            srv6_t_insert_3;
+        }
+        implementation = host_selector;
+        @name("select_host_counter")
+        counters = direct_counter(CounterType.packets_and_bytes);
+    }
+
     apply {
+
+        local_metadata.hit_bit = 0;
+        if(local_metadata.is_clone == true){
+            local_metadata.hit_bit = 1;
+        }
+        //local_metadata.is_clone = false;
 
         if (hdr.cpu_out.isValid()) {
             // *** TODO EXERCISE 4
@@ -798,6 +851,16 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
             //     // dropped = true;
             //     exit;
             // }
+
+            // if(local_metadata.is_clone==true){
+            //     select_host.apply();
+            // }else{
+            //     guide_table.apply();    
+            // }
+                select_host.apply();
+                guide_table.apply();    
+
+
             if(hdr.ipv6.isValid() && my_station_table.apply().hit ){
             
                 if(local_sid_table.apply().hit){
