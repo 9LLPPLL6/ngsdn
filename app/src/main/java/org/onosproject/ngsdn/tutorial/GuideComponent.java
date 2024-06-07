@@ -89,6 +89,7 @@ public class GuideComponent {
 
     private static final int DEFAULT_GUIDE_GROUP_ID = 0xec3a0000;
     private static final long GROUP_INSERT_DELAY_MILLIS = 200;  //延迟时间
+    private static final int PACKET_CLONE_SESSION_ID = 100;
 
     private final DeviceListener deviceListener = new InternalDeviceListener();
 
@@ -201,18 +202,18 @@ public class GuideComponent {
                                                 Collection<Ip6Address> hostIps,                                    
                                                 DeviceId deviceId) {
 
-        String actionProfileId = "IngressPipeImpl.host_selector";
+        String actionProfileId = "EgressPipeImpl.host_selector";
 
         Ip6Address firstIp = Ip6Address.valueOf("3:103:2::");
         Ip6Address secIp = Ip6Address.valueOf("3:204:2::");
 
         final List<PiAction> actions = Lists.newArrayList();
 
-        final String tableId = "IngressPipeImpl.select_host";
+        final String tableId = "EgressPipeImpl.select_host";
 
         for(Ip6Address hostip:hostIps){
             final PiAction action = PiAction.builder()
-                     .withId(PiActionId.of("IngressPipeImpl.srv6_t_insert_2"))
+                     .withId(PiActionId.of("EgressPipeImpl.srv6_t_insert_3"))
                      .withParameter(new PiActionParam(PiActionParamId.of("s1"), firstIp.toOctets()))
                      .withParameter(new PiActionParam(PiActionParamId.of("s2"), secIp.toOctets()))
                      .withParameter(new PiActionParam(PiActionParamId.of("s3"), hostip.toOctets()))
@@ -231,10 +232,9 @@ public class GuideComponent {
 
         final String tableId = "IngressPipeImpl.guide_table";
 
-        int clone = 0;
-        int port = 1;
+        
         final PiCriterion match = PiCriterion.builder()
-                .matchExact(PiMatchFieldId.of("local_metadata.hit_bit"),clone)
+                .matchTernary(PiMatchFieldId.of("hdr.ipv6.src_addr"), Ip6Address.valueOf("2001:1:1::0").toOctets(), Ip6Address.valueOf("FFFF:FFFF:FFFF::0").toOctets())
                 .build();
     
         final PiTableAction action = PiAction.builder()
@@ -277,7 +277,15 @@ public class GuideComponent {
 
         final GroupDescription group = createGuideHostGroup(groupId,ips,deviceId);
 
-        final String tableId = "IngressPipeImpl.select_host";
+        final GroupDescription cloneGroup = Utils.buildCloneGroup(
+                appId,
+                deviceId,
+                PACKET_CLONE_SESSION_ID,
+                // Ports where to clone the packet.
+                // Just controller in this case.
+                Collections.singleton(PortNumber.portNumber(2)));
+
+        final String tableId = "EgressPipeImpl.select_host";
         final PiCriterion match = PiCriterion.builder()
                 .matchExact(
                         PiMatchFieldId.of("local_metadata.hit_bit"),
@@ -290,6 +298,7 @@ public class GuideComponent {
 
         try{
             groupService.addGroup(group);
+            groupService.addGroup(cloneGroup);
             Thread.sleep(GROUP_INSERT_DELAY_MILLIS);
             flowRuleService.applyFlowRules(rule);
         }catch(InterruptedException e){

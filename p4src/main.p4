@@ -46,6 +46,15 @@
 //packet clone session id
 #define PACKET_CLONE_SESSION_ID   100
 
+/* Define constants for types of packets */
+#define PKT_INSTANCE_TYPE_NORMAL 0
+#define PKT_INSTANCE_TYPE_INGRESS_CLONE 1
+#define PKT_INSTANCE_TYPE_EGRESS_CLONE 2
+#define PKT_INSTANCE_TYPE_COALESCED 3
+#define PKT_INSTANCE_TYPE_INGRESS_RECIRC 4
+#define PKT_INSTANCE_TYPE_REPLICATION 5
+#define PKT_INSTANCE_TYPE_RESUBMIT 6
+
 typedef bit<9>   port_num_t;
 typedef bit<48>  mac_addr_t;
 typedef bit<16>  mcast_group_id_t;
@@ -230,8 +239,8 @@ struct local_metadata_t {
     bit<32> output_hash_four;
     bit<32> counter_four;
 
-    bit<8> hit_bit;
-    bool is_clone;
+    bit<8>  hit_bit;
+    
 }
 
 
@@ -766,15 +775,16 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
 
     //clone the packet and then set srv6 header to throughput guide 
     action packet_clone(){
-        local_metadata.is_clone = true;
-        clone3(CloneType.I2E, PACKET_CLONE_SESSION_ID, { standard_metadata.ingress_port, local_metadata.is_clone,local_metadata.hit_bit });
+        //local_metadata.is_clone = true;
+        clone3(CloneType.I2E, PACKET_CLONE_SESSION_ID, { standard_metadata.ingress_port,local_metadata.hit_bit });
         //clone_ingress_pkt_to_egress();
     }
 
     table guide_table{
         key = {
-            local_metadata.hit_bit:       exact;
+            //local_metadata.hit_bit:       exact;
             // standard_metadata.ingress_port:    exact;
+            hdr.ipv6.src_addr  :ternary;
         }
         actions = {
             packet_clone;
@@ -783,36 +793,33 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
         counters = direct_counter(CounterType.packets_and_bytes);
     }
 
-    action_selector(HashAlgorithm.crc16, 32w3, 32w3) host_selector;
+    // action_selector(HashAlgorithm.crc16, 32w3, 32w3) host_selector;
 
     action set_dst(bit<128> dst_addr,mac_addr_t dst_mac){
         hdr.ipv6.dst_addr = dst_addr;
         hdr.ethernet.dst_addr = dst_mac;
     }
 
-    table select_host{
-        key = {
-            local_metadata.hit_bit:  exact;
-            hdr.ipv6.dst_addr:          selector;
-            hdr.ipv6.flow_label:        selector;
-            hdr.ipv6.src_addr:          selector;
-        }
-        actions = {
-             //set_dst;
-            srv6_t_insert_3;
-        }
-        implementation = host_selector;
-        @name("select_host_counter")
-        counters = direct_counter(CounterType.packets_and_bytes);
-    }
+    // table select_host{
+    //     key = {
+    //         local_metadata.hit_bit:  exact;
+    //         hdr.ipv6.dst_addr:          selector;
+    //         hdr.ipv6.flow_label:        selector;
+    //         hdr.ipv6.src_addr:          selector;
+    //     }
+    //     actions = {
+    //          //set_dst;
+    //         srv6_t_insert_3;
+    //     }
+    //     implementation = host_selector;
+    //     @name("select_host_counter")
+    //     counters = direct_counter(CounterType.packets_and_bytes);
+    // }
 
     apply {
 
-        local_metadata.hit_bit = 0;
-        if(local_metadata.is_clone == true){
-            local_metadata.hit_bit = 1;
-        }
-        //local_metadata.is_clone = false;
+        
+        
 
         if (hdr.cpu_out.isValid()) {
             // *** TODO EXERCISE 4
@@ -857,8 +864,8 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
             // }else{
             //     guide_table.apply();    
             // }
-                select_host.apply();
-                guide_table.apply();    
+                //select_host.apply();
+                // guide_table.apply();    
 
 
             if(hdr.ipv6.isValid() && my_station_table.apply().hit ){
@@ -890,8 +897,10 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
                  //}
             }
                 if(hdr.ipv6.hop_limit == 0){ drop();}
+                //guide_table.apply();
             }
 
+            guide_table.apply();
 
 
             // *** TODO EXERCISE 6
@@ -935,6 +944,61 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
 control EgressPipeImpl (inout parsed_headers_t hdr,
                         inout local_metadata_t local_metadata,
                         inout standard_metadata_t standard_metadata) {
+
+
+    action insert_srv6h_header(bit<8> num_segments) {
+        hdr.srv6h.setValid();
+        hdr.srv6h.next_hdr = hdr.ipv6.next_hdr;
+        hdr.srv6h.hdr_ext_len =  num_segments * 2;
+        hdr.srv6h.routing_type = 4;
+        hdr.srv6h.segment_left = num_segments - 1;
+        hdr.srv6h.last_entry = num_segments - 1;
+        hdr.srv6h.flags = 0;
+        hdr.srv6h.tag = 0;
+        hdr.ipv6.next_hdr = IP_PROTO_SRV6;
+    }
+    action srv6_t_insert_2(ipv6_addr_t s1, ipv6_addr_t s2) {
+        hdr.ipv6.dst_addr = s1;
+        hdr.ipv6.payload_len = hdr.ipv6.payload_len + 40;
+        insert_srv6h_header(2);
+        hdr.srv6_list[0].setValid();
+        hdr.srv6_list[0].segment_id = s2;
+        hdr.srv6_list[1].setValid();
+        hdr.srv6_list[1].segment_id = s1;
+    }
+
+    action srv6_t_insert_3(ipv6_addr_t s1, ipv6_addr_t s2, ipv6_addr_t s3) {
+        hdr.ipv6.dst_addr = s1;
+        hdr.ipv6.payload_len = hdr.ipv6.payload_len + 56;
+        insert_srv6h_header(3);
+        hdr.srv6_list[0].setValid();
+        hdr.srv6_list[0].segment_id = s3;
+        hdr.srv6_list[1].setValid();
+        hdr.srv6_list[1].segment_id = s2;
+        hdr.srv6_list[2].setValid();
+        hdr.srv6_list[2].segment_id = s1;
+    }
+    
+    action_selector(HashAlgorithm.crc16, 32w3, 32w3) host_selector;
+    table select_host{
+            key = {
+                local_metadata.hit_bit:  exact;
+                hdr.ipv6.dst_addr:          selector;
+                hdr.ipv6.flow_label:        selector;
+                hdr.ipv6.src_addr:          selector;
+            }
+            actions = {
+                //set_dst;
+                srv6_t_insert_3;
+            }
+            implementation = host_selector;
+            @name("select_host_counter")
+            counters = direct_counter(CounterType.packets_and_bytes);
+
+        }
+
+    
+
     apply {
 
         if (standard_metadata.egress_port == CPU_PORT) {
@@ -957,6 +1021,12 @@ control EgressPipeImpl (inout parsed_headers_t hdr,
         if (local_metadata.is_multicast == true &&
               standard_metadata.ingress_port == standard_metadata.egress_port) {
             mark_to_drop(standard_metadata);
+        }
+
+        if(standard_metadata.instance_type == PKT_INSTANCE_TYPE_INGRESS_CLONE){
+            local_metadata.hit_bit = 1;
+            select_host.apply();
+
         }
     }
 }
