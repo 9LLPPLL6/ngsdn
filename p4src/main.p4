@@ -997,7 +997,7 @@ control EgressPipeImpl (inout parsed_headers_t hdr,
             @name("select_host_counter")
             counters = direct_counter(CounterType.packets_and_bytes);
 
-        }
+    }
 
     
 

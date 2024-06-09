@@ -156,14 +156,7 @@ public class SetDirectionComponent {
                                             .filter(device_port->!post_to_hosts.contains(device_port))
                                             .collect(Collectors.toSet());
 
-            // mainComponent.getExecutorService().execute(()->{
-            //     // log.info("{} event! host {},deviceId {},inport {},ouport {}",
-            //     // event.type(),host.id(),deviceId,port,);
-            //     device_ports_to_device.stream()
-            //         .forEach(outsideport -> learnHost(host,deviceId,internalport,outsideport,GO_OUTSIDE));
-            //     device_ports_to_device.stream()
-            //         .forEach(outsideport -> learnHost(host,deviceId,outsideport,internalport,ENTER_INTERNAL));
-            // });
+           
         }
     }
 
