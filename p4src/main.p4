@@ -239,8 +239,9 @@ struct local_metadata_t {
     bit<32> output_hash_four;
     bit<32> counter_four;
 
-    bit<8>  hit_bit;
-    
+    bit<8>     hit_bit;
+    bit<8>     is_srv6_pop;
+    bit<128>   dst_addr;
 }
 
 
@@ -776,7 +777,7 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
     //clone the packet and then set srv6 header to throughput guide 
     action packet_clone(){
         //local_metadata.is_clone = true;
-        clone3(CloneType.I2E, PACKET_CLONE_SESSION_ID, { standard_metadata.ingress_port,local_metadata.hit_bit });
+        clone(CloneType.I2E, PACKET_CLONE_SESSION_ID);
         //clone_ingress_pkt_to_egress();
     }
 
@@ -895,12 +896,13 @@ control IngressPipeImpl (inout parsed_headers_t    hdr,
                         }
                     }
                  //}
-            }
+                }
                 if(hdr.ipv6.hop_limit == 0){ drop();}
-                //guide_table.apply();
+
+                guide_table.apply();
             }
 
-            guide_table.apply();
+            // guide_table.apply();
 
 
             // *** TODO EXERCISE 6
@@ -1009,10 +1011,10 @@ control EgressPipeImpl (inout parsed_headers_t hdr,
             // 1. Set cpu_in header as valid
             // 2. Set the cpu_in.ingress_port field to the original packet's
             //    ingress port (standard_metadata.ingress_port).
-	    hdr.cpu_in.setValid();
+	        hdr.cpu_in.setValid();
             hdr.cpu_in.ingress_port = standard_metadata.ingress_port;
             exit;
-	}
+	    }
 
         // If this is a multicast packet (flag set by l2_ternary_table), make
         // sure we are not replicating the packet on the same port where it was
@@ -1021,11 +1023,17 @@ control EgressPipeImpl (inout parsed_headers_t hdr,
         if (local_metadata.is_multicast == true &&
               standard_metadata.ingress_port == standard_metadata.egress_port) {
             mark_to_drop(standard_metadata);
+            
         }
 
         if(standard_metadata.instance_type == PKT_INSTANCE_TYPE_INGRESS_CLONE){
             local_metadata.hit_bit = 1;
             select_host.apply();
+            if(hdr.srv6h.next_hdr == IP_PROTO_SRV6){
+                mark_to_drop(standard_metadata);
+                exit;
+            }
+            
 
         }
     }

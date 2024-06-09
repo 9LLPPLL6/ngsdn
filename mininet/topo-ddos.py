@@ -114,7 +114,7 @@ class TutorialTopo(Topo):
         h4b = self.addHost('h4b',cls=IPv6Host,mac="00:00:00:00:00:4B",
                           ipv6='2001:1:4::b/64',ipv6_gw='2001:1:4::ff')
         h4c = self.addHost('h4c',cls=IPv6Host,mac="00:00:00:00:00:4C",
-                          ipv6='2001:1:4::b/64',ipv6_gw='2001:1:4::ff')
+                          ipv6='2001:1:4::c/64',ipv6_gw='2001:1:4::ff')
         
         self.addLink(h1,leaf1) # port 3
         self.addLink(h2,leaf2) # port 3

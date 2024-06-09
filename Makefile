@@ -286,3 +286,7 @@ check-gtp:
 	util/mn-cmd enodeb /mininet/recv-gtp.py -e
 	make stop
 	make solution-revert
+
+clean-out:
+	sudo rm -rf ./mininet/host-service/out
+	mkdir  ./mininet/host-service/out
